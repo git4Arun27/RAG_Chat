@@ -27,7 +27,7 @@ print("Loading Model Success")
 #Model for Embedding vector Conversion
 embed_model=FastEmbedEmbedding(model_name="BAAI/bge-small-en-v1.5")
 Settings.embed_model=embed_model
-
+print("Loading Embed Model Success")
 
 def initialize_parser():
     return LlamaParse(
@@ -57,9 +57,9 @@ def initialize_parser():
 
 def initialize_qdrant_client():
     return QdrantClient(
-        url=os.getenv("QDRANT_URL"),
+        url=os.getenv("PK_QDRANT_URL"),
         prefer_grpc=True,
-        api_key=os.getenv("QDRANT_API_KEY")
+        api_key=os.getenv("PK_QDRANT_API_KEY")
     )
 
 def parse_excel():
@@ -67,8 +67,8 @@ def parse_excel():
     file_extractor={".xlsx":parser}
     return SimpleDirectoryReader(input_files=['report.xlsx'], file_extractor=file_extractor).load_data() #Will return Document Object
 
-def initialize_vector_store(qdrant_client, collection_name):
-    return QdrantVectorStore(client=qdrant_client, collection_name=collection_name)
+def initialize_vector_store(quadrant_client, collection_name):
+    return QdrantVectorStore(client=quadrant_client, collection_name=collection_name)
 
 def save_vector_embeddings_to_qdrant(collection_name):
     qdrant_client=initialize_qdrant_client()
@@ -79,25 +79,31 @@ def save_vector_embeddings_to_qdrant(collection_name):
     storage_context=StorageContext.from_defaults(vector_store=vector_store)
     VectorStoreIndex.from_documents(documents, storage_context=storage_context)
 
-def create_query_engine(collection_name):
-    qdrant_client = initialize_qdrant_client()
+qdrant_client=initialize_qdrant_client()
+vector_store=initialize_vector_store(qdrant_client,"noun_modifier_attributes")
 
-    vector_store=initialize_vector_store(qdrant_client,collection_name)
+def create_query_engine():
     db_index = VectorStoreIndex.from_vector_store(vector_store=vector_store)
     return db_index.as_query_engine() #returns query_engine
 
+query_engine=create_query_engine()
+
 def get_response(query):
- response =create_query_engine("noun_modifier_attributes").query(query)
+ response =query_engine.query(query)
  return response.response
 
-@app.route("/generate",methods=["POST"])
+@app.route("/chat",methods=["POST"])
 def generate_response():
     request_body=request.get_json()
     if not request_body:
-        return jsonify({"error": "Prompt is required"}), 400
+        return jsonify({"error": "Prompt is required"}), 404
 
     query=request_body.get("message")
-    return jsonify({"response": get_response(query)})
+    response=get_response(query)
+
+    if response.startswith("There is no information about"): response=get_response(f"Show the URL and suggest checking the 'Url' column of {query}.")
+
+    return jsonify({"response": response})
 
 if __name__ == "__main__":
     app.run(debug=True,host="0.0.0.0")
